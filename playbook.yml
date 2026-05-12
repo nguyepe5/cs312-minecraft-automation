@@ -1,0 +1,108 @@
+---
+- name: Configure Minecraft Server on EC2
+  hosts: all
+  become: true
+  
+  vars:
+    s3_bucket: "cs312-minecraft-backup-{{aws_account_id}}"
+    data_dir: "/data"
+
+
+  tasks:
+    - name: Debug variables
+      debug:
+        msg: "AWS Account ID: {{aws_account_id}}, AWS Region: {{aws_region}}, Minecraft Image Tag: {{minecraft_image_tag}}"
+
+    - name: Install Docker Prerequisites
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - python3-pip
+        state: present
+        update_cache: true
+
+    - name: Add Docker GPG key
+      shell: | 
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        chmod a+r /etc/apt/keyrings/docker.asc
+      args:
+        creates: /etc/apt/keyrings/docker.asc
+
+    - name: Add Docker apt repository
+      shell: | 
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+
+    - name: Install Docker Engine
+      apt:
+        name: 
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Install Docker Python SDK
+      apt:
+        name: python3-docker
+        state: present
+
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Install AWS CLI
+      apt:
+        name: awscli
+        state: present
+        update_cache: true
+
+    - name: Get ECR login token
+      command: aws ecr get-login-password --region "{{ aws_region }}"
+      register: ecr_password
+
+    - name: Log in to ECR
+      community.docker.docker_login:
+        registry_url: "{{aws_account_id}}.dkr.ecr.{{aws_region}}.amazonaws.com"
+        username: AWS
+        password: "{{ ecr_password.stdout }}"
+
+    # Change this later to pull from ECR instead of Docker Hub
+    - name: Pull Minecraft image from Docker Hub
+      community.docker.docker_image:
+        name: itzg/minecraft-server
+        tag: latest
+        source: pull
+
+    - name: Create /data directory
+      file:
+        path: /data
+        state: directory
+
+    - name: Restore world data from S3 bucket
+      command: aws s3 cp s3://{{ s3_bucket }}/world {{ data_dir }} --recursive
+      ignore_errors: true  # Ignore errors if the S3 bucket or world data doesn't exist yet
+
+    - name: Run Minecraft server container
+      community.docker.docker_container:
+        name: minecraft-server
+        # Temporarily using the public image from Docker Hub for testing - update this to use the ECR image once CI/CD is working
+        image: itzg/minecraft-server:latest
+        # image: "{{aws_account_id}}.dkr.ecr.{{aws_region}}.amazonaws.com/cs312-minecraft-terraform:{{minecraft_image_tag}}"
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "25565:25565"
+        volumes:
+          - "{{ data_dir }}:/data"
+        env:
+          EULA: "TRUE"
+          MEMORY: "1G"
+          MOTD: "Peter Nguyen 934426623"
