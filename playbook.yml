@@ -90,6 +90,10 @@
       command: aws s3 cp s3://{{ s3_bucket }}/world {{ data_dir }} --recursive
       ignore_errors: true  # Ignore errors if the S3 bucket or world data doesn't exist yet
 
+    - name: Back up world data to S3
+      command: aws s3 sync {{ data_dir }} s3://{{ s3_bucket }}/world
+      ignore_errors: true  # Ignore errors if the S3 bucket or world data doesn't exist yet
+
     - name: Run Minecraft server container
       community.docker.docker_container:
         name: minecraft-server
@@ -106,3 +110,17 @@
           EULA: "TRUE"
           MEMORY: "1G"
           MOTD: "Peter Nguyen 934426623"
+
+    - name: Create backup script
+      copy:
+        dest: /usr/local/bin/backup-minecraft.sh
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          aws s3 cp /data/world s3://{{ s3_bucket }}/world --recursive
+
+    - name: Schedule hourly backup
+      cron:
+        name: "minecraft world backup"
+        second: "0"
+        job: "/usr/local/bin/backup-minecraft.sh"
