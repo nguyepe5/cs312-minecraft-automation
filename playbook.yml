@@ -74,11 +74,10 @@
         username: AWS
         password: "{{ ecr_password.stdout }}"
 
-    # Change this later to pull from ECR instead of Docker Hub
-    - name: Pull Minecraft image from Docker Hub
+    - name: Pull Minecraft image from ECR
       community.docker.docker_image:
-        name: itzg/minecraft-server
-        tag: latest
+        name: "{{aws_account_id}}.dkr.ecr.{{aws_region}}.amazonaws.com/cs312-minecraft-terraform"
+        tag: "{{minecraft_image_tag}}"
         source: pull
 
     - name: Create /data directory
@@ -97,9 +96,7 @@
     - name: Run Minecraft server container
       community.docker.docker_container:
         name: minecraft-server
-        # Temporarily using the public image from Docker Hub for testing - update this to use the ECR image once CI/CD is working
-        image: itzg/minecraft-server:latest
-        # image: "{{aws_account_id}}.dkr.ecr.{{aws_region}}.amazonaws.com/cs312-minecraft-terraform:{{minecraft_image_tag}}"
+        image: "{{aws_account_id}}.dkr.ecr.{{aws_region}}.amazonaws.com/cs312-minecraft-terraform:{{minecraft_image_tag}}"
         state: started
         restart_policy: unless-stopped
         ports:
@@ -122,5 +119,4 @@
     - name: Schedule hourly backup
       cron:
         name: "minecraft world backup"
-        second: "0"
         job: "/usr/local/bin/backup-minecraft.sh"
